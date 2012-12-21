@@ -95,7 +95,7 @@ def sync_node(node):
             # Synchronize the kitchen directory
             _synchronize_node(filepath, node)
             # Execute Chef Solo
-            _configure_node()
+            _configure_node(node)
         finally:
             _remove_local_node_data_bag()
             _node_cleanup()
@@ -345,7 +345,7 @@ def _add_search_patch():
             os.path.join(lib_path, filename), use_sudo=True)
 
 
-def _configure_node():
+def _configure_node(node):
     """Exectutes chef-solo to apply roles and recipes to a node"""
     print("\nCooking...")
     # Backup last report
@@ -366,6 +366,7 @@ def _configure_node():
     if (output.failed or "FATAL: Stacktrace dumped" in output or
             ("Chef Run complete" not in output and
             "Report handlers complete" not in output)):
+        _update_nodes_status(node['name'], node['run_list'], False)
         if 'chef-solo: command not found' in output:
             print(
                 colors.red(
@@ -380,4 +381,27 @@ def _configure_node():
             import sys
             sys.exit(1)
     else:
+        _update_nodes_status(node['name'], node['run_list'], True)
         print(colors.green("\nSUCCESS: Node correctly configured"))
+
+def _update_nodes_status(node_name, run_list, status):
+    """Updates the last_run time and status on a node"""
+    with settings(hide('stdout', 'warnings', 'running'), warn_only=True):
+        last_run_time = int(run('date +%s'))
+    try:
+        with open('nodes_status.json', 'r') as f:
+            nodes_status = json.loads(f.read())
+    except json.JSONDecodeError:
+        abort("nodes_status is in invalid JSON format"
+              ":\n  {0}".format(output))
+    except IOError:
+        print("\nCreating new nodes_status.json")
+        nodes_status = {}
+
+    nodes_status[node_name] = {
+        'status': status,
+        'time': last_run_time,
+        'run_list': run_list
+    }
+    with open('nodes_status.json', 'w') as f:
+        f.write(json.dumps(nodes_status, indent=4))
